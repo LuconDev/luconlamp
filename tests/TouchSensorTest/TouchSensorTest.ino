@@ -33,7 +33,7 @@ const long LONG_PRESS_TIME = 6000;
 
 void setup() {
   // Debug console
-  Serial.begin(9600);
+  Serial.begin(115200);
 
   // initialize capacitive touch buttons
   pinMode(buttonPin, INPUT);

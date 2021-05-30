@@ -1,11 +1,12 @@
 /* Lucon.ino
-  January 2021
-  Christopher Datsikas
-
+  May 2021
+  
   Hardware
-  - NodeMCU or Adafruit ESP8266 Huzzah https://www.adafruit.com/product/3046
+  - Microcontroller, either
+  ---- NodeMCU https://www.amazon.com/HiLetgo-Internet-Development-Wireless-Micropython/dp/B081CSJV2V/
+  ---- Adafruit ESP8266 Huzzah https://www.adafruit.com/product/3046
   - RGBW Neopixel https://www.adafruit.com/product/2832
-  - TTP223B Capacitive Touch
+  - TTP223B Capacitive Touch https://www.amazon.com/gp/product/B01LWKFS7L/
 
   References
   1. Button Control - ArduinoGetStarted.com - Public Domain
@@ -26,12 +27,12 @@
 
 // Include relevant libraries 
 #include <Adafruit_NeoPixel.h>    // Neopixel Control
-#include <ESP8266WiFi.h>          //ESP8266 Core WiFi Library
+#include <ESP8266WiFi.h>          // ESP8266 Core WiFi Library
 #include <PubSubClient.h>         // MQTT Communication
-#include "credentials.h"          // store Wifi and MQTT credentials locally
-#include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
-#include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
-#include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
+#include "credentials.h"          // Store Wifi and MQTT credentials locally
+#include <DNSServer.h>            // Local DNS Server used for redirecting all requests to the configuration portal
+#include <ESP8266WebServer.h>     // Local WebServer used to serve the configuration portal
+#include <WiFiManager.h>          // https://github.com/tzapu/WiFiManager WiFi Configuration Magic
 
 // in credentials.h
 //const char *device_id = "";
@@ -43,8 +44,6 @@
 //const char *sub_topic_name = "";
 
 // Neopixel constants
-#define NEOPIXEL_PIN 5    // GPIO-05 - D5 Adafruit Feather Huzzah / D1 NodeMCU
-#define NUMPIXEL_COUNT 4       // Number of LEDs in strip
 #define MID_BRIGHTNESS 30
 #define MAX_BRIGHTNESS 254
 #define PULSE_SLOW 10
@@ -52,10 +51,20 @@
 #define PULSE_FAST 1
 #define DELAYVAL 5
 
-// Pin Assignments //todo, replace with all caps locks
-const int touchPin = 12;    // GPIO-12 - D12 Adafruit Feature  Huzzah / D6 NodeMCU - touch sensor pin
+// Pin Assignments //todo consolidate
+const int switchPin = 14;   //GPIO-12: Feather Huzzah ESP8266 Port Pin 12. NodeMCU Port Pin D6. // Low means device is switched on. high means device is switched off.
+const int touchPin = 12;    // GPIO-12 - D12 Adafruit Feather Huzzah / D6 NodeMCU - touch sensor pin
 const int ledPin = 2;       // GPIO-16 Node MCU LED - the number of the output pin - onboard LED for debugging
-                             // GPIO-02 ESP-12 LED
+                            // GPIO-02 ESP-12 LED
+const int neopixelPin = 5;  // GPIO-05 - D5 Adafruit Feather Huzzah / D1 NodeMCU
+const int neopixelCount = 4;// Number of LEDs in strip
+
+// Variables for switch
+boolean powerState = HIGH;  // if device is on or off
+int previousSwitchState = 0;
+int currentSwitchState = 0;
+unsigned long switchTime = 0;
+                             
 // Variables for touch sensor tracking
 int lastState = LOW;  // the previous state from the input pin
 int currentState;     // the current reading from the input pin
@@ -67,7 +76,6 @@ const long DEBOUNCE = 20;           // the debounce time, increase if the output
 const long LONG_PRESS_TIME = 6000;  // distinction between short and long press
 
 // Variables for Lucon state machine
-boolean powerState = HIGH;  // if device is on or off
 boolean lightState = HIGH;  // if device is in decorative (high) or support (low) mode todo:lightState
 enum Modes {DECORATIVE,
             BREATH,
@@ -85,7 +93,7 @@ int responseCounter = 0;
 
 // Initialize one continuous NeoPixel Strip
 // while Adafruit claims this strip to be RGBW, I actually found the strip to behave as GRBW
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUMPIXEL_COUNT, NEOPIXEL_PIN, NEO_RGBW + NEO_KHZ800);
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(neopixelCount, neopixelPin, NEO_RGBW + NEO_KHZ800);
 // For RGB Neopixels, try using NEO_GRB. If so, make sure to check that all instances of strip.color() are compatible
 
 // Initialize the Wifi and MQTT Client
@@ -101,12 +109,19 @@ void setup() {
   Serial.begin(115200);
   Serial.flush();
 
+  //turnOn
+  turnOn();
+
   // initialize capacitive touch buttons
   pinMode(touchPin, INPUT);
 
   // debug onboard LED
   pinMode(ledPin, OUTPUT);      // Onboard LED is active LOW
-  digitalWrite(ledPin, LOW);    
+  digitalWrite(ledPin, LOW);
+
+  //configure switchPin as an input and enable the internal pull-up resistor
+  pinMode(switchPin, INPUT_PULLUP);
+  pinMode(ledPin, OUTPUT);
 
   // initialize neopixel strip
   strip.begin(); // Initialize pins for output
@@ -133,74 +148,86 @@ void setup() {
 } 
 
 void loop() {
-  // maintain MQTT Connection
-  if (!client.connected())
-  {
-    
-    reconnect();
+  // read the switch value into a variable
+  // if the switch input has changed and we've waited long enough
+  currentSwitchState = digitalRead(switchPin);
+  if (currentSwitchState != previousSwitchState && millis() - switchTime > DEBOUNCE) {
+    Serial.print("Previous powerState "); Serial.println(powerState);
+    powerState = !powerState;
+    Serial.print("New powerState "); Serial.println(powerState);
+    previousSwitchState = currentSwitchState;
+    switchTime = millis();
   }
-  client.loop();
-
-  // continuously polls the capacitive sensor - TTP223B is actuve high
-  currentState = digitalRead(touchPin);
-  if (lastState == LOW && currentState == HIGH) {       // button is pressed
-    pressedTime = millis();
-    isPressing = true;
-    isLongDetected = false;
-  } else if (lastState == HIGH && currentState == LOW) { // button is released
-    isPressing = false;
-    releasedTime = millis();
-    //Serial.println(pressedTime); Serial.println(releasedTime); Serial.println(LONG_PRESS_TIME);
-
-    // button is released within certain duration range
-    long pressDuration = releasedTime - pressedTime;
-    if (pressDuration > DEBOUNCE && pressDuration < LONG_PRESS_TIME) {
-      Serial.println("A short press is detected");
-      handleShortPress();
+  
+  if (powerState){
+    // maintain MQTT Connection
+    if (!client.connected())
+    {
+      // todo: turn blue again when connection is lost
+      reconnect();
+    }
+    client.loop();
+  
+    // continuously polls the capacitive sensor - TTP223B is active high
+    currentState = digitalRead(touchPin);
+    if (lastState == LOW && currentState == HIGH) {       // button is pressed
+      pressedTime = millis();
+      isPressing = true;
+      isLongDetected = false;
+    } else if (lastState == HIGH && currentState == LOW) { // button is released
+      isPressing = false;
+      releasedTime = millis();
+      //Serial.println(pressedTime); Serial.println(releasedTime); Serial.println(LONG_PRESS_TIME);
+  
+      // button is released within certain duration range
+      long pressDuration = releasedTime - pressedTime;
+      if (pressDuration > DEBOUNCE && pressDuration < LONG_PRESS_TIME) {
+        Serial.println("A short press is detected");
+        handleShortPress();
+      }
+    }
+    // button has been pressed for a long time
+    if (isPressing == true && isLongDetected == false) {
+      if (millis() - pressedTime >= LONG_PRESS_TIME) {
+        Serial.println("A long press is detected");
+        handleLongPress();
+        isLongDetected = true;
+      }
+    }
+    lastState = currentState;  // save the the last state
+  
+    // NEOPIXEL behavior & lampModeTimeouts
+    switch (lampMode) {
+      case DECORATIVE:
+        // do nothing
+        break;
+      case BREATH:
+        //Serial.println("enter breath case of lampMode");
+        pulseWhiteContinuously(PULSE_SLOW);
+        if (millis() - lampModeTimer > BREATH_TIMEOUT) { //todo, deal with millis overflow
+          Serial.println("BREATH_TIMEOUT Hit");
+          setLampMode(DECORATIVE);
+        }
+        break;
+      case GLOW:
+          if (millis() - lampModeTimer > GLOW_TIMEOUT) { //todo, deal with millis overflow
+          Serial.println("GLOW_TIMEOUT Hit");
+          setLampMode(DECORATIVE);
+          responseCounter = 0;
+        }
+        break;
+      case SUPPORTREQUESTED:
+        pulseWhiteContinuously(PULSE_FAST);
+        if (millis() - lampModeTimer > SUPPORT_REQUESTED_TIMEOUT) {
+          Serial.println("SUPPORT_REQUESTED_TIMEOUT Hit");
+          pulseGreenOnce(PULSE_FAST);
+          pulseGreenOnce(PULSE_FAST);
+          pulseGreenOnce(PULSE_FAST);
+          setLampMode(DECORATIVE);
+        }
+        break;
     }
   }
-  // button has been pressed for a long time
-  if (isPressing == true && isLongDetected == false) {
-    if (millis() - pressedTime >= LONG_PRESS_TIME) {
-      Serial.println("A long press is detected");
-      handleLongPress();
-      isLongDetected = true;
-    }
-  }
-  lastState = currentState;  // save the the last state
-
-  // NEOPIXEL behavior & lampModeTimeouts
-  switch (lampMode) {
-    case DECORATIVE:
-      // do nothing
-      break;
-    case BREATH:
-      //Serial.println("enter breath case of lampMode");
-      pulseWhiteContinuously(PULSE_SLOW);
-      if (millis() - lampModeTimer > BREATH_TIMEOUT) { //todo, deal with millis overflow
-        Serial.println("BREATH_TIMEOUT Hit");
-        setLampMode(DECORATIVE);
-      }
-      break;
-    case GLOW:
-        if (millis() - lampModeTimer > GLOW_TIMEOUT) { //todo, deal with millis overflow
-        Serial.println("GLOW_TIMEOUT Hit");
-        setLampMode(DECORATIVE);
-        responseCounter = 0;
-      }
-      break;
-    case SUPPORTREQUESTED:
-      pulseWhiteContinuously(PULSE_FAST);
-      if (millis() - lampModeTimer > SUPPORT_REQUESTED_TIMEOUT) {
-        Serial.println("SUPPORT_REQUESTED_TIMEOUT Hit");
-        pulseGreenOnce(PULSE_FAST);
-        pulseGreenOnce(PULSE_FAST);
-        pulseGreenOnce(PULSE_FAST);
-        setLampMode(DECORATIVE);
-      }
-      break;
-  }
-
 } // end of loop ---
 
 void handleShortPress() {         // on short press 
@@ -360,7 +387,7 @@ void callback(char* topic, byte* payload, unsigned int length)
   }
 }
 
-// establishes wifi & mqtt connection and subscribes to toptics
+// establishes wifi & mqtt connection and subscribes to topics
 void reconnect()
 {
   if (!client.connected()) //todo: allow user to use decorative mode without wifi connection

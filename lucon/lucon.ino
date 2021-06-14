@@ -7,6 +7,7 @@
   ---- Adafruit ESP8266 Huzzah https://www.adafruit.com/product/3046
   - RGBW Neopixel https://www.adafruit.com/product/2832
   - TTP223B Capacitive Touch https://www.amazon.com/gp/product/B01LWKFS7L/
+  - SPDT Switch https://www.adafruit.com/product/805
 
   References
   1. Button Control - ArduinoGetStarted.com - Public Domain
@@ -41,26 +42,27 @@
 //char *mqtt_server = "";
 //char *mqtt_port = "";
 //char *mqtt_username = "";
-//const char *sub_topic_name = "";
+//const char *sub_topic_request = "";
+//const char *sub_topic_response = "";
+//const char *sub_topic_demo = "";
 
 // Neopixel constants
-#define MID_BRIGHTNESS 30
-#define MAX_BRIGHTNESS 254
+#define BRIGHTNESS_VAL 254
 #define PULSE_SLOW 10
 #define PULSE_MEDIUM 5
 #define PULSE_FAST 1
 #define DELAYVAL 5
+const int neopixelCount = 4;// Number of LEDs in strip
 
-// Pin Assignments //todo consolidate
-const int switchPin = 14;   //GPIO-12: Feather Huzzah ESP8266 Port Pin 12. NodeMCU Port Pin D6. // Low means device is switched on. high means device is switched off.
-const int touchPin = 12;    // GPIO-12 - D12 Adafruit Feather Huzzah / D6 NodeMCU - touch sensor pin
+// Pin Assignments
+const int switchPin = 14;   // GPIO-14: Feather Huzzah ESP8266 Port Pin 14 / Port Pin D5 NodeMCU. - pin of SPDT switch 
+const int touchPin = 12;    // GPIO-12 - D12 Adafruit Feather Huzzah / Port Pin D6 NodeMCU - touch sensor pin
 const int ledPin = 2;       // GPIO-16 Node MCU LED - the number of the output pin - onboard LED for debugging
                             // GPIO-02 ESP-12 LED
 const int neopixelPin = 5;  // GPIO-05 - D5 Adafruit Feather Huzzah / D1 NodeMCU
-const int neopixelCount = 4;// Number of LEDs in strip
 
 // Variables for switch
-boolean powerState = HIGH;  // if device is on or off
+boolean powerState = LOW;  // if device is on (high) or off (low)
 int previousSwitchState = 0;
 int currentSwitchState = 0;
 unsigned long switchTime = 0;
@@ -76,11 +78,11 @@ const long DEBOUNCE = 20;           // the debounce time, increase if the output
 const long LONG_PRESS_TIME = 6000;  // distinction between short and long press
 
 // Variables for Lucon state machine
-boolean lightState = HIGH;  // if device is in decorative (high) or support (low) mode todo:lightState
-enum Modes {DECORATIVE,
-            BREATH,
-            GLOW,
-            SUPPORTREQUESTED
+boolean lightState = LOW;  // if device is in decorative (high) or support (low) mode
+enum Modes {DECORATIVE,     // 0
+            BREATH,         // 1
+            GLOW,           // 2
+            SUPPORTREQUESTED// 3
            };
 enum Modes lampMode;
 unsigned long lampModeTimer;
@@ -88,7 +90,7 @@ unsigned long neopixelTimer;
 const long BREATH_TIMEOUT = 500000;
 const long GLOW_TIMEOUT = 500000;
 const long SUPPORT_REQUESTED_TIMEOUT = 600000;
-int responseCounter = 0;
+int responseCounter = 4;
 
 
 // Initialize one continuous NeoPixel Strip
@@ -109,8 +111,8 @@ void setup() {
   Serial.begin(115200);
   Serial.flush();
 
-  //turnOn
-  turnOn();
+  // turnOn
+  turnOn(); //powerState set to High 
 
   // initialize capacitive touch buttons
   pinMode(touchPin, INPUT);
@@ -126,7 +128,7 @@ void setup() {
   // initialize neopixel strip
   strip.begin(); // Initialize pins for output
   strip.clear();
-  strip.fill(strip.Color(0, 0, 100, 0));    // turn blue while user sets up wifi password
+  strip.fill(strip.Color(0, 0, BRIGHTNESS_VAL, 0));    // turn blue while user sets up wifi password
   //strip.setBrightness(MAX_BRIGHTNESS);
   strip.show();  // Turn all LEDs off ASAP
 
@@ -140,30 +142,38 @@ void setup() {
   client.setServer(mqtt_server, atoi(mqtt_port)); // setServer port argument is int 
   client.setCallback(callback);
 
-  strip.fill(strip.Color(100, 0, 0, 0));
+  strip.clear();; // turn blue light off when entering info from AP is complete
   strip.show();
+
+  // 0 - ON | 1 - OFF
+  currentSwitchState = digitalRead(switchPin);
+  Serial.print("currentSwitchState:"); Serial.println(currentSwitchState);
+  
   Serial.print("lightState:"); Serial.println(lightState);
-  Serial.print("lampMode: "); Serial.println(lampMode);
+  Serial.print("lampMode:"); Serial.println(lampMode);
   Serial.println("Setup Complete");
 } 
 
 void loop() {
-  // read the switch value into a variable
+  // read the switch value into a variable and updates powerState 
   // if the switch input has changed and we've waited long enough
   currentSwitchState = digitalRead(switchPin);
   if (currentSwitchState != previousSwitchState && millis() - switchTime > DEBOUNCE) {
-    Serial.print("Previous powerState "); Serial.println(powerState);
-    powerState = !powerState;
-    Serial.print("New powerState "); Serial.println(powerState);
+    if (currentSwitchState == LOW) {
+      turnOn();
+    }
+    else if (currentSwitchState == HIGH) {
+      turnOff();
+    }
     previousSwitchState = currentSwitchState;
     switchTime = millis();
   }
   
+  // if device is on (according to the switch)
   if (powerState){
     // maintain MQTT Connection
     if (!client.connected())
     {
-      // todo: turn blue again when connection is lost
       reconnect();
     }
     client.loop();
@@ -268,11 +278,10 @@ void handleLongPress() {      // on long press
   }
 }
 
-
 // sets the "Lamp Mode", a psedo-state machine
 // DECORATIVE is the default mode, where the lamp can change light state via short press, or
 // user can longPress to enter BREATH, or can transition to SUPPORTREQUESTED, if request comes through MQTT topic
-// BREATH takes the user through a medidative session through pulsing night and invites other lamps in the network to join
+// BREATH takes the user through a medidative session through pulsing light and invites other lamps in the network to join
 // SUPPORTREQUESTED is entered when another lamp in the network requests support
 void setLampMode(Modes nextLampMode) {
   if (nextLampMode == DECORATIVE) {
@@ -305,12 +314,12 @@ void setLightState(boolean nextLightState) {
 }
 
 void requestSupport() {
-  client.publish("LuconSupportRequest", device_id);
+  client.publish(sub_topic_request, device_id);
   Serial.println("Support has been requested");
 }
 
 void provideSupport() {
-  client.publish("LuconSupportResponse", device_id);
+  client.publish(sub_topic_response, device_id);
   Serial.println("Support has been provided");
 }
 
@@ -339,26 +348,26 @@ void callback(char* topic, byte* payload, unsigned int length)
       digitalWrite(ledPin, HIGH); // PIN LOW will switch ON the relay
     }
   }
-  else if (strcmp(topic, "LuconSupportRequest") == 0) {
+  else if (strcmp(topic, sub_topic_request) == 0) {
     if (lampMode == DECORATIVE) {
       setLampMode(SUPPORTREQUESTED);
     }
   }
-  else if (strcmp(topic, "LuconSupportResponse") == 0) {
+  else if (strcmp(topic, sub_topic_response) == 0) {
     if (lampMode == BREATH) {
       setLampMode(GLOW);
       pulseGreenOnce(PULSE_MEDIUM);
       responseCounter=4;
     }
     if (lampMode == GLOW) {
-      //pulseGreenOnce(PULSE_MEDIUM);
       responseCounter++;
-      strip.fill(strip.Color(0, 0, 0, strip.gamma8(40*responseCounter)));
+      pulseGreenOnce(PULSE_MEDIUM);                                       // Lamp will flash green, and then
+      strip.fill(strip.Color(0, 0, 0, strip.gamma8(40*responseCounter))); // Lamp (w LEDs) grows brighter as more people join
       strip.show();
     }
   }
   // below cases are for demo code, in case you want to try controlling your device from MQTT App
-  else if (strcmp(topic, "lucon_demo_control") == 0) {
+  else if (strcmp(topic, sub_topic_demo) == 0) {
     if (msgString == "shortPress") {
       handleShortPress();
     }
@@ -397,16 +406,18 @@ void reconnect()
     {
       Serial.println("connected");
       digitalWrite(ledPin, HIGH); //turn off the debug led todo
-      strip.clear();              // turn off Neopixels when connected
-      strip.show();
-      client.publish("online", device_id);
-      client.subscribe(sub_topic_name);
-      client.subscribe("LuconSupportRequest");
-      client.subscribe("LuconSupportResponse");
-      client.subscribe("lucon_demo_control");
+      pulseGreenOnce(PULSE_FAST);
+      pulseGreenOnce(PULSE_FAST);
+      
+      client.publish(sub_topic_telemetry, device_id);
+      client.subscribe(sub_topic_request);
+      client.subscribe(sub_topic_response);
+      client.subscribe(sub_topic_demo);
     }
     else
     {
+      strip.fill(strip.Color(0, 0, BRIGHTNESS_VAL, 0));    // turn blue to show connection has been lost
+      strip.show();
       Serial.print("failed, rc=");
       Serial.print(client.state());
       Serial.println(" try again in 5 seconds");
@@ -557,7 +568,9 @@ void setWhiteOff(uint8_t wait) {
 
 // virtually turns on the lamp
 void turnOn() {
+  Serial.print("Previous powerState "); Serial.println(powerState);
   powerState = HIGH;
+  Serial.println("Turning On");
   Serial.print("Power State set to:"); Serial.println(powerState);
 }
 
@@ -565,6 +578,8 @@ void turnOn() {
 void turnOff() {
   strip.clear(); // Set all pixel colors to 'off'
   strip.show();
+  Serial.print("Previous powerState "); Serial.println(powerState);
   powerState = LOW;
-  Serial.print("Power State set to"); Serial.println(powerState);
+  Serial.println("Turning Off");
+  Serial.print("Power State set to:"); Serial.println(powerState);
 }

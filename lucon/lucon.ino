@@ -37,11 +37,12 @@
 
 // in credentials.h
 //const char *device_id = "";
-//char *ssid = "";
-//char *password = "";
+//char *ssid = "";                // not used because we use AP instead
+//char *password = "";            // not used because we use AP instead
 //char *mqtt_server = "";
 //char *mqtt_port = "";
 //char *mqtt_username = "";
+//char *mqtt_password = "";
 //const char *sub_topic_request = "";
 //const char *sub_topic_response = "";
 //const char *sub_topic_demo = "";
@@ -131,6 +132,7 @@ void setup() {
   strip.fill(strip.Color(0, 0, BRIGHTNESS_VAL, 0));    // turn blue while user sets up wifi password
   //strip.setBrightness(MAX_BRIGHTNESS);
   strip.show();  // Turn all LEDs off ASAP
+  Serial.println("Turning blue light on");
 
   // Wifi AP - intialized in setup since we can get rid of it after
   WiFiManager wifiManager;
@@ -144,6 +146,7 @@ void setup() {
 
   strip.clear();; // turn blue light off when entering info from AP is complete
   strip.show();
+  Serial.println("Turning blue light off");
 
   // 0 - ON | 1 - OFF
   currentSwitchState = digitalRead(switchPin);
@@ -151,6 +154,11 @@ void setup() {
   
   Serial.print("lightState:"); Serial.println(lightState);
   Serial.print("lampMode:"); Serial.println(lampMode);
+  Serial.print("device_id:"); Serial.println(device_id);
+  Serial.println(sub_topic_request);
+  Serial.println(sub_topic_response);
+  Serial.println(sub_topic_demo);
+  Serial.println(sub_topic_telemetry);
   Serial.println("Setup Complete");
 } 
 
@@ -362,6 +370,7 @@ void callback(char* topic, byte* payload, unsigned int length)
     if (lampMode == GLOW) {
       responseCounter++;
       pulseGreenOnce(PULSE_MEDIUM);                                       // Lamp will flash green, and then
+      Serial.println("Color set to white 40*responseCounter");
       strip.fill(strip.Color(0, 0, 0, strip.gamma8(40*responseCounter))); // Lamp (w LEDs) grows brighter as more people join
       strip.show();
     }
@@ -418,6 +427,7 @@ void reconnect()
     {
       strip.fill(strip.Color(0, 0, BRIGHTNESS_VAL, 0));    // turn blue to show connection has been lost
       strip.show();
+      Serial.println("Set color to blue");
       Serial.print("failed, rc=");
       Serial.print(client.state());
       Serial.println(" try again in 5 seconds");
@@ -510,6 +520,7 @@ void pulseWhiteContinuously(uint8_t wait) {
 // pulses Green continuously by adjustable speed- not currently used
 // non-blocking, by using millis() timer
 void pulseGreenContinuously(uint8_t wait) {
+  Serial.println("Pulsing Green Continuously");
   if (millis() - neopixelTimer > wait) {
     static uint16_t g = 0;
     static boolean reverse = false;
@@ -531,6 +542,7 @@ void pulseGreenContinuously(uint8_t wait) {
 // pulses Green color, by adjustable speed
 // currently blocking due to delay function
 void pulseGreenOnce(uint8_t wait) {
+  Serial.println("Pulsing Green Once");
   for (int g = 0; g < 256; g++) { // Ramp up from 0 to 255
     strip.fill(strip.Color(g, 0, 0, 0));
     strip.show();

@@ -35,17 +35,18 @@
 #include <ESP8266WebServer.h>     // Local WebServer used to serve the configuration portal
 #include <WiFiManager.h>          // https://github.com/tzapu/WiFiManager WiFi Configuration Magic
 
-// in credentials.h
-//const char *device_id = "";
+// #defines in credentials.h
+const char *device_id = MYDEVICE_ID;
 //char *ssid = "";                // not used because we use AP instead
 //char *password = "";            // not used because we use AP instead
-//char *mqtt_server = "";
-//char *mqtt_port = "";
-//char *mqtt_username = "";
-//char *mqtt_password = "";
-//const char *sub_topic_request = "";
-//const char *sub_topic_response = "";
-//const char *sub_topic_demo = "";
+char *mqtt_server = MQTT_SERVER_ENDPOINT;
+char *mqtt_port = MQTT_PORT_NUMBER;
+char *mqtt_username = MYDEVICE_ID;
+char *mqtt_password = MQTT_MYPASSWORD;
+const char *sub_topic_request = TOPIC_REQUEST;
+const char *sub_topic_response = TOPIC_RESPONSE;
+const char *sub_topic_demo = TOPIC_DEMO;
+char *sub_topic_telemetry = TOPIC_TELEMETRY;
 
 // Neopixel constants
 #define BRIGHTNESS_VAL 254

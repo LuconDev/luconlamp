@@ -81,12 +81,14 @@ const long LONG_PRESS_TIME = 6000;  // distinction between short and long press
 
 // Variables for Lucon state machine
 boolean lightState = LOW;  // if device is in decorative (high) or support (low) mode
+const char * lightStateNames[] = {"Light State Low", "Light State High"};
 enum Modes {DECORATIVE,     // 0
             BREATH,         // 1
             GLOW,           // 2
             SUPPORTREQUESTED// 3
            };
 enum Modes lampMode;
+const char *modeNames[] = {"DECORATIVE", "BREATH", "GLOW", "SUPPORTREQUESTED"};
 unsigned long lampModeTimer;
 unsigned long neopixelTimer; 
 const long BREATH_TIMEOUT = 500000;
@@ -254,6 +256,7 @@ void handleShortPress() {         // on short press
   switch (lampMode) {
     case DECORATIVE:
       setLightState(!lightState); // toggle lightState
+      client.publish(sub_topic_telemetry, lightStateNames[lightState]);
       break;
     case BREATH:
       setLampMode(DECORATIVE);    // exit BREATH mode
@@ -293,6 +296,7 @@ void handleLongPress() {      // on long press
 // BREATH takes the user through a medidative session through pulsing light and invites other lamps in the network to join
 // SUPPORTREQUESTED is entered when another lamp in the network requests support
 void setLampMode(Modes nextLampMode) {
+  client.publish(sub_topic_telemetry, modeNames[nextLampMode]);
   if (nextLampMode == DECORATIVE) {
     // do nothing
   }
@@ -324,11 +328,13 @@ void setLightState(boolean nextLightState) {
 
 void requestSupport() {
   client.publish(sub_topic_request, device_id);
+  client.publish(sub_topic_telemetry, "requests support");
   Serial.println("Support has been requested");
 }
 
 void provideSupport() {
   client.publish(sub_topic_response, device_id);
+  client.publish(sub_topic_telemetry, "provides support");
   Serial.println("Support has been provided");
 }
 
@@ -365,16 +371,16 @@ void callback(char* topic, byte* payload, unsigned int length)
   else if (strcmp(topic, sub_topic_response) == 0) {
     if (lampMode == BREATH) {
       setLampMode(GLOW);
-      pulseGreenOnce(PULSE_MEDIUM);
-      responseCounter=4;
+      responseCounter=1;
     }
-    if (lampMode == GLOW) {
+    if (lampMode == GLOW && responseCounter < 5) {
       responseCounter++;
-      pulseGreenOnce(PULSE_MEDIUM);                                       // Lamp will flash green, and then
-      Serial.println("Color set to white 40*responseCounter");
-      strip.fill(strip.Color(0, 0, 0, strip.gamma8(40*responseCounter))); // Lamp (w LEDs) grows brighter as more people join
-      strip.show();
     }
+    client.publish(sub_topic_telemetry, "receives support");
+    pulseGreenOnce(PULSE_MEDIUM);                                       // Lamp will flash green, and then
+    Serial.print("Color set to white 30* ");Serial.print(responseCounter);Serial.println(" + 100");  
+    strip.fill(strip.Color(0, 0, 0, strip.gamma8(30*responseCounter + 100))); // Lamp (w LEDs) grows brighter as more people join
+    strip.show();    
   }
   // below cases are for demo code, in case you want to try controlling your device from MQTT App
   else if (strcmp(topic, sub_topic_demo) == 0) {
@@ -416,8 +422,7 @@ void reconnect()
     {
       Serial.println("connected");
       digitalWrite(ledPin, HIGH); //turn off the debug led todo
-      pulseGreenOnce(PULSE_FAST);
-      pulseGreenOnce(PULSE_FAST);
+      pulseGreenOnce(PULSE_MEDIUM);
       
       client.publish(sub_topic_telemetry, device_id);
       client.subscribe(sub_topic_request);
@@ -584,6 +589,7 @@ void turnOn() {
   Serial.print("Previous powerState "); Serial.println(powerState);
   powerState = HIGH;
   Serial.println("Turning On");
+  client.publish(sub_topic_telemetry, "Turning On");
   Serial.print("Power State set to:"); Serial.println(powerState);
 }
 
@@ -594,5 +600,6 @@ void turnOff() {
   Serial.print("Previous powerState "); Serial.println(powerState);
   powerState = LOW;
   Serial.println("Turning Off");
+  client.publish(sub_topic_telemetry, "Turning Off");
   Serial.print("Power State set to:"); Serial.println(powerState);
 }

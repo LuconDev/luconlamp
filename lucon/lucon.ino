@@ -46,7 +46,7 @@ char *mqtt_password = MQTT_MYPASSWORD;
 const char *sub_topic_request = TOPIC_REQUEST;
 const char *sub_topic_response = TOPIC_RESPONSE;
 const char *sub_topic_demo = TOPIC_DEMO;
-char *sub_topic_telemetry = TOPIC_TELEMETRY;
+const char *sub_topic_telemetry = TOPIC_TELEMETRY;
 
 // Neopixel constants
 #define BRIGHTNESS_VAL 254
@@ -82,19 +82,18 @@ const long LONG_PRESS_TIME = 6000;  // distinction between short and long press
 // Variables for Lucon state machine
 boolean lightState = LOW;  // if device is in decorative (high) or support (low) mode
 const char * lightStateNames[] = {"Light State Low", "Light State High"};
-enum Modes {DECORATIVE,     // 0
-            BREATH,         // 1
-            GLOW,           // 2
-            SUPPORTREQUESTED// 3
+enum Modes {DECORATIVE,     // 0 - tap for on and off
+            BREATH,         // 1 - slow white flash
+            TOGETHER,       // 2 - slow green flash
+            SUPPORTREQUESTED// 3 - fast white flash
            };
 enum Modes lampMode;
-const char *modeNames[] = {"DECORATIVE", "BREATH", "GLOW", "SUPPORTREQUESTED"};
+const char *modeNames[] = {"DECORATIVE", "BREATH", "TOGETHER", "SUPPORTREQUESTED"};
 unsigned long lampModeTimer;
 unsigned long neopixelTimer;
 const long BREATH_TIMEOUT = 500000;
-const long GLOW_TIMEOUT = 500000;
+const long TOGETHER_TIMEOUT = 500000;
 const long SUPPORT_REQUESTED_TIMEOUT = 600000;
-int responseCounter = 4;
 
 
 // Initialize one continuous NeoPixel Strip
@@ -230,11 +229,11 @@ void loop() {
           setLampMode(DECORATIVE);
         }
         break;
-      case GLOW:
-        if (millis() - lampModeTimer > GLOW_TIMEOUT) { //todo, deal with millis overflow
-          Serial.println("GLOW_TIMEOUT Hit");
+      case TOGETHER:
+        pulseGreenContinuously(PULSE_SLOW);
+        if (millis() - lampModeTimer > TOGETHER_TIMEOUT) { //todo, deal with millis overflow
+          Serial.println("TOGETHER_TIMEOUT Hit");
           setLampMode(DECORATIVE);
-          responseCounter = 0;
         }
         break;
       case SUPPORTREQUESTED:
@@ -261,12 +260,11 @@ void handleShortPress() {         // on short press
     case BREATH:
       setLampMode(DECORATIVE);    // exit BREATH mode
       break;
-    case GLOW:
+    case TOGETHER:
       setLampMode(DECORATIVE);
       break;
     case SUPPORTREQUESTED:
       setLampMode(DECORATIVE);    // decline support request
-      responseCounter = 0;
       break;
   }
 }
@@ -280,12 +278,12 @@ void handleLongPress() {      // on long press
     case BREATH:
       // DO NOTHING
       break;
-    case GLOW:
+    case TOGETHER:
       // DO NOTHING
       break;
     case SUPPORTREQUESTED:
       provideSupport();       // acknowledge support request
-      setLampMode(GLOW);    // join in on BREATH session
+      setLampMode(TOGETHER);    // join in on BREATH session
       break;
   }
 }
@@ -370,18 +368,11 @@ void callback(char* topic, byte* payload, unsigned int length)
   }
   else if (strcmp(topic, sub_topic_response) == 0) {
     if (lampMode == BREATH) {
-      setLampMode(GLOW);
-      responseCounter = 1;
+      setLampMode(TOGETHER);
     }
-    if (lampMode == GLOW && responseCounter < 5) {
-      responseCounter++;
-    }
-    if (lampMode == BREATH || lampMode == GLOW) {
+    if (lampMode == BREATH || lampMode == TOGETHER) {
       client.publish(sub_topic_telemetry, "Receives Support");
       pulseGreenOnce(PULSE_MEDIUM);                                       // Lamp will flash green, and then
-      Serial.print("Color set to white 30* "); Serial.print(responseCounter); Serial.println(" + 100");
-      strip.fill(strip.Color(0, 0, 0, strip.gamma8(30 * responseCounter + 100))); // Lamp (w LEDs) grows brighter as more people join
-      strip.show();
     }
   }
   // below cases are for demo code, in case you want to try controlling your device from MQTT App
@@ -528,7 +519,6 @@ void pulseWhiteContinuously(uint8_t wait) {
 // pulses Green continuously by adjustable speed- not currently used
 // non-blocking, by using millis() timer
 void pulseGreenContinuously(uint8_t wait) {
-  Serial.println("Pulsing Green Continuously");
   if (millis() - neopixelTimer > wait) {
     static uint16_t g = 0;
     static boolean reverse = false;

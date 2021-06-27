@@ -1,6 +1,6 @@
 /* Lucon.ino
   May 2021
-  
+
   Hardware
   - Microcontroller, either
   ---- NodeMCU https://www.amazon.com/HiLetgo-Internet-Development-Wireless-Micropython/dp/B081CSJV2V/
@@ -26,7 +26,7 @@
   https://www.arduino.cc/en/Tutorial/DigitalInputPullup
 */
 
-// Include relevant libraries 
+// Include relevant libraries
 #include <Adafruit_NeoPixel.h>    // Neopixel Control
 #include <ESP8266WiFi.h>          // ESP8266 Core WiFi Library
 #include <PubSubClient.h>         // MQTT Communication
@@ -57,7 +57,7 @@ char *sub_topic_telemetry = TOPIC_TELEMETRY;
 const int neopixelCount = 4;// Number of LEDs in strip
 
 // Pin Assignments
-const int switchPin = 14;   // GPIO-14: Feather Huzzah ESP8266 Port Pin 14 / Port Pin D5 NodeMCU. - pin of SPDT switch 
+const int switchPin = 14;   // GPIO-14: Feather Huzzah ESP8266 Port Pin 14 / Port Pin D5 NodeMCU. - pin of SPDT switch
 const int touchPin = 12;    // GPIO-12 - D12 Adafruit Feather Huzzah / Port Pin D6 NodeMCU - touch sensor pin
 const int ledPin = 2;       // GPIO-16 Node MCU LED - the number of the output pin - onboard LED for debugging
                             // GPIO-02 ESP-12 LED
@@ -68,7 +68,7 @@ boolean powerState = LOW;  // if device is on (high) or off (low)
 int previousSwitchState = 0;
 int currentSwitchState = 0;
 unsigned long switchTime = 0;
-                             
+
 // Variables for touch sensor tracking
 int lastState = LOW;  // the previous state from the input pin
 int currentState;     // the current reading from the input pin
@@ -90,7 +90,7 @@ enum Modes {DECORATIVE,     // 0
 enum Modes lampMode;
 const char *modeNames[] = {"DECORATIVE", "BREATH", "GLOW", "SUPPORTREQUESTED"};
 unsigned long lampModeTimer;
-unsigned long neopixelTimer; 
+unsigned long neopixelTimer;
 const long BREATH_TIMEOUT = 500000;
 const long GLOW_TIMEOUT = 500000;
 const long SUPPORT_REQUESTED_TIMEOUT = 600000;
@@ -116,7 +116,7 @@ void setup() {
   Serial.flush();
 
   // turnOn
-  turnOn(); //powerState set to High 
+  turnOn(); //powerState set to High
 
   // initialize capacitive touch buttons
   pinMode(touchPin, INPUT);
@@ -144,7 +144,7 @@ void setup() {
   //setupFullWifiAP(); // if we want to collect mqtt info on the captive portal
 
   // MQTT Communication
-  client.setServer(mqtt_server, atoi(mqtt_port)); // setServer port argument is int 
+  client.setServer(mqtt_server, atoi(mqtt_port)); // setServer port argument is int
   client.setCallback(callback);
 
   strip.clear();; // turn blue light off when entering info from AP is complete
@@ -154,7 +154,7 @@ void setup() {
   // 0 - ON | 1 - OFF
   currentSwitchState = digitalRead(switchPin);
   Serial.print("currentSwitchState:"); Serial.println(currentSwitchState);
-  
+
   Serial.print("lightState:"); Serial.println(lightState);
   Serial.print("lampMode:"); Serial.println(lampMode);
   Serial.print("device_id:"); Serial.println(device_id);
@@ -163,10 +163,10 @@ void setup() {
   Serial.println(sub_topic_demo);
   Serial.println(sub_topic_telemetry);
   Serial.println("Setup Complete");
-} 
+}
 
 void loop() {
-  // read the switch value into a variable and updates powerState 
+  // read the switch value into a variable and updates powerState
   // if the switch input has changed and we've waited long enough
   currentSwitchState = digitalRead(switchPin);
   if (currentSwitchState != previousSwitchState && millis() - switchTime > DEBOUNCE) {
@@ -179,16 +179,16 @@ void loop() {
     previousSwitchState = currentSwitchState;
     switchTime = millis();
   }
-  
+
   // if device is on (according to the switch)
-  if (powerState){
+  if (powerState) {
     // maintain MQTT Connection
     if (!client.connected())
     {
       reconnect();
     }
     client.loop();
-  
+
     // continuously polls the capacitive sensor - TTP223B is active high
     currentState = digitalRead(touchPin);
     if (lastState == LOW && currentState == HIGH) {       // button is pressed
@@ -199,7 +199,7 @@ void loop() {
       isPressing = false;
       releasedTime = millis();
       //Serial.println(pressedTime); Serial.println(releasedTime); Serial.println(LONG_PRESS_TIME);
-  
+
       // button is released within certain duration range
       long pressDuration = releasedTime - pressedTime;
       if (pressDuration > DEBOUNCE && pressDuration < LONG_PRESS_TIME) {
@@ -216,7 +216,7 @@ void loop() {
       }
     }
     lastState = currentState;  // save the the last state
-  
+
     // NEOPIXEL behavior & lampModeTimeouts
     switch (lampMode) {
       case DECORATIVE:
@@ -231,7 +231,7 @@ void loop() {
         }
         break;
       case GLOW:
-          if (millis() - lampModeTimer > GLOW_TIMEOUT) { //todo, deal with millis overflow
+        if (millis() - lampModeTimer > GLOW_TIMEOUT) { //todo, deal with millis overflow
           Serial.println("GLOW_TIMEOUT Hit");
           setLampMode(DECORATIVE);
           responseCounter = 0;
@@ -251,7 +251,7 @@ void loop() {
   }
 } // end of loop ---
 
-void handleShortPress() {         // on short press 
+void handleShortPress() {         // on short press
   Serial.print("lampMode: "); Serial.println(lampMode);
   switch (lampMode) {
     case DECORATIVE:
@@ -371,16 +371,18 @@ void callback(char* topic, byte* payload, unsigned int length)
   else if (strcmp(topic, sub_topic_response) == 0) {
     if (lampMode == BREATH) {
       setLampMode(GLOW);
-      responseCounter=1;
+      responseCounter = 1;
     }
     if (lampMode == GLOW && responseCounter < 5) {
       responseCounter++;
     }
-    client.publish(sub_topic_telemetry, "receives support");
-    pulseGreenOnce(PULSE_MEDIUM);                                       // Lamp will flash green, and then
-    Serial.print("Color set to white 30* ");Serial.print(responseCounter);Serial.println(" + 100");  
-    strip.fill(strip.Color(0, 0, 0, strip.gamma8(30*responseCounter + 100))); // Lamp (w LEDs) grows brighter as more people join
-    strip.show();    
+    if (lampMode == BREATH || lampMode == GLOW) {
+      client.publish(sub_topic_telemetry, "Receives Support");
+      pulseGreenOnce(PULSE_MEDIUM);                                       // Lamp will flash green, and then
+      Serial.print("Color set to white 30* "); Serial.print(responseCounter); Serial.println(" + 100");
+      strip.fill(strip.Color(0, 0, 0, strip.gamma8(30 * responseCounter + 100))); // Lamp (w LEDs) grows brighter as more people join
+      strip.show();
+    }
   }
   // below cases are for demo code, in case you want to try controlling your device from MQTT App
   else if (strcmp(topic, sub_topic_demo) == 0) {
@@ -401,7 +403,7 @@ void callback(char* topic, byte* payload, unsigned int length)
     else if (msgString == "breath") {  // lamp in decorative mode, simulates long-press to start BREATH
       setLampMode(BREATH);
     }
-    else if (msgString == "flash") {  // lamp in decorative mode, flash white quickly 
+    else if (msgString == "flash") {  // lamp in decorative mode, flash white quickly
       setLampMode(SUPPORTREQUESTED);
     }
     else if (msgString == "response") { // lamp in breath mode, flashes green to simulate someone responding
@@ -423,7 +425,7 @@ void reconnect()
       Serial.println("connected");
       digitalWrite(ledPin, HIGH); //turn off the debug led todo
       pulseGreenOnce(PULSE_MEDIUM);
-      
+
       client.publish(sub_topic_telemetry, device_id);
       client.subscribe(sub_topic_request);
       client.subscribe(sub_topic_response);
@@ -463,7 +465,7 @@ void setupFullWifiAP() {
   //set config save notify callback
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
-    //add all your parameters here
+  //add all your parameters here
   wifiManager.addParameter(&custom_mqtt_server);
   wifiManager.addParameter(&custom_mqtt_port);
   wifiManager.addParameter(&custom_mqtt_username);
@@ -494,7 +496,7 @@ void setupFullWifiAP() {
 
 // callback notifying us of the need to save config in the Full Wifi Setup
 // currently not used
-void saveConfigCallback () {  
+void saveConfigCallback () {
   Serial.println("Should save config");
   shouldSaveConfig = true;
 }
@@ -506,7 +508,7 @@ void pulseWhiteContinuously(uint8_t wait) {
   if (millis() - neopixelTimer > wait) {
     static uint16_t w = 0;
     static boolean reverse = false;
-    if (reverse == false){ 
+    if (reverse == false) {
       w++;
       if (w >= 255) reverse = true;
     }
@@ -530,7 +532,7 @@ void pulseGreenContinuously(uint8_t wait) {
   if (millis() - neopixelTimer > wait) {
     static uint16_t g = 0;
     static boolean reverse = false;
-    if (reverse == false){ 
+    if (reverse == false) {
       g++;
       if (g >= 255) reverse = true;
     }
